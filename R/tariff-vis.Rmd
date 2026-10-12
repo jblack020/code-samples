@@ -1,0 +1,256 @@
+---
+title: "Tariff Data Visualization"
+author: "Justin Black"
+date: "2025-04-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(readr)
+library(tidyr)
+library(scales)
+```
+
+```{r fig.width=20, fig.height=5}
+
+# Load data
+us_trade_balance <- read.csv("../Downloads/us-trade-deficit-by-country-2025.csv")
+
+us_trade_balance <- us_trade_balance |> 
+  filter(USTradeDeficit_TradeDeficit_usd_2024 > 0) |> 
+  select(country, USTradeDeficit_TradeDeficit_usd_2024) |> 
+  rename(US_Trade_Deficit_2024 = USTradeDeficit_TradeDeficit_usd_2024)
+
+global_trade_balance <- read.csv("../Documents/global_trade_balance.csv") 
+
+cleaned_data <- global_trade_balance |>
+  pivot_longer(
+    cols = starts_with("X"),
+    names_to = "GTB_Year",
+    values_to = "Global_Trade_Balance"
+  ) |>
+  mutate(GTB_Year = sub("X", "", GTB_Year)) |>
+  filter(!is.na(Global_Trade_Balance)) |>
+  group_by(country) |>
+  slice_max(order_by = GTB_Year, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  select(country, GTB_Year, Global_Trade_Balance)
+
+us_import_tariffs <- read.csv("../Downloads/us_import_tariffs.csv") |>
+  mutate(
+    Tariff = as.numeric(str_replace(Tariff, "%", "")),
+  ) |>
+  add_row(
+    country = "Canada",
+    Tariff = 0,
+  ) |>
+  add_row(
+    country = "Mexico",
+    Tariff = 0,
+  )
+
+# Load and expand GDP
+gdp_by_country <- read.csv("../Documents/gdp_by_country.csv") |>
+  mutate(
+    X2024 = as.numeric(X2024),
+    GDP_2024 = X2024 * 1e9
+  ) |>
+  select(country, GDP_2024)
+
+# Merge
+merged_data <- us_trade_balance |>
+  inner_join(cleaned_data, by = "country") |>
+  left_join(us_import_tariffs, by = "country") |>
+  left_join(gdp_by_country, by = "country")
+
+limit <- 15
+
+plot_data <- merged_data |> 
+  arrange(desc(US_Trade_Deficit_2024)) |> 
+  slice_head(n = limit) |>
+  select(country, US_Trade_Surplus = US_Trade_Deficit_2024, Global_Trade_Balance) |> 
+  pivot_longer(
+    cols = c(US_Trade_Surplus, Global_Trade_Balance),
+    names_to = "Trade_Type",
+    values_to = "Balance"
+  ) 
+
+# After pivot_longer()
+plot_data <- plot_data |> 
+  mutate(
+    country = factor(country, levels = merged_data |> 
+                       arrange(desc(US_Trade_Deficit_2024)) |> 
+                       slice_head(n = limit) |> 
+                       pull(country))
+  )
+
+tariff_line_data <- limited_data |>
+  select(country, Tariff) |>
+  mutate(country = reorder(country, -Tariff))
+
+# Plot
+ggplot(plot_data, aes(x = country, y = Balance, fill = Trade_Type)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+
+  # Add line + dots for Tariff using second axis
+  geom_line(
+    data = tariff_line_data,
+    aes(x = country, y = Tariff * 1e9, group = 1),
+    inherit.aes = FALSE,
+    color = "black",
+    size = 1
+  ) +
+  geom_point(
+    data = tariff_line_data,
+    aes(x = country, y = Tariff * 1e9),
+    inherit.aes = FALSE,
+    color = "black",
+    size = 2.5
+  ) +
+  geom_hline(yintercept = 10 / 1e-9, color = "orange", linetype = "dashed") +
+  scale_fill_manual(
+  name = "Trade Type",
+  values = c(
+    `US_Trade_Surplus` = "#00BFC4",  # blue
+    `Global_Trade_Balance` = "#F8766D"  # orange
+  ),
+  labels = c(
+    "Global Trade Balance",
+    "US Trade Balance"
+  )
+) +
+
+  # Axes
+  scale_y_continuous(
+    labels = label_dollar(scale = 1e-9, suffix = "B"),
+    sec.axis = sec_axis(~./1e9, name = "Tariff (%)")  # secondary y-axis
+    
+  ) +
+
+  labs(
+    x = "Country",
+    y = "Trade Balance (Billions USD)",
+    fill = "Trade Type",
+    
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.title.y.right = element_text(color = "black")
+  ) +
+  coord_cartesian(ylim = c(0, 2e11))
+
+```
+
+```{r fig.width=20, fig.height=5}
+# Load trade deficit data
+us_trade_balance <- read.csv("../Downloads/us-trade-deficit-by-country-2025.csv") |>
+  filter(USTradeDeficit_TradeDeficit_usd_2024 > 0) |> 
+  select(country, USTradeDeficit_TradeDeficit_usd_2024) |> 
+  rename(US_Trade_Deficit_2024 = USTradeDeficit_TradeDeficit_usd_2024)
+
+# Load global trade balance
+global_trade_balance <- read.csv("../Documents/global_trade_balance.csv") |>
+  pivot_longer(
+    cols = starts_with("X"),
+    names_to = "GTB_Year",
+    values_to = "Global_Trade_Balance"
+  ) |>
+  mutate(GTB_Year = sub("X", "", GTB_Year)) |>
+  filter(!is.na(Global_Trade_Balance)) |>
+  group_by(country) |>
+  slice_max(order_by = GTB_Year, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  select(country, GTB_Year, Global_Trade_Balance)
+
+# Load and clean tariffs
+us_import_tariffs <- read.csv("../Downloads/us_import_tariffs.csv") |>
+  mutate(
+    Tariff = as.numeric(str_replace(Tariff, "%", ""))
+  ) |>
+  add_row(country = "Canada", Tariff = 0) |>
+  add_row(country = "Mexico", Tariff = 0)
+
+# Load and expand GDP
+gdp_by_country <- read.csv("../Documents/gdp_by_country.csv") |>
+  mutate(
+    X2024 = as.numeric(X2024),
+    GDP_2024 = X2024 * 1e9
+  ) |>
+  select(country, GDP_2024)
+
+# Merge all data
+merged_data <- us_trade_balance |>
+  inner_join(global_trade_balance, by = "country") |>
+  left_join(us_import_tariffs, by = "country") |>
+  left_join(gdp_by_country, by = "country") |>
+  mutate(
+    US_Trade_Surplus_Pct_GDP = US_Trade_Deficit_2024 / GDP_2024 * 100,
+    Global_Trade_Balance_Pct_GDP = Global_Trade_Balance / GDP_2024 * 100
+  )
+
+# Limit to top N by US trade deficit
+limit <- 30
+limited_data <- merged_data |>
+  arrange(desc(US_Trade_Deficit_2024)) |>
+  slice_head(n = limit)
+
+# Prepare plot data
+plot_data <- limited_data |> 
+  select(
+    country, 
+    `US_Trade_Surplus (% GDP)` = US_Trade_Surplus_Pct_GDP, 
+    `Global_Trade_Balance (% GDP)` = Global_Trade_Balance_Pct_GDP
+  ) |> 
+  pivot_longer(
+    cols = c(`US_Trade_Surplus (% GDP)`, `Global_Trade_Balance (% GDP)`),
+    names_to = "Trade_Type",
+    values_to = "Balance"
+  )
+
+tariff_line_data <- limited_data |>
+  select(country, Tariff) |>
+  mutate(country = reorder(country, -Tariff))
+
+# Plot
+ggplot(plot_data, aes(x = reorder(country, -Balance), y = Balance, fill = Trade_Type)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+
+  geom_line(
+  data = tariff_line_data,
+  aes(x = country, y = Tariff / 2.857, group = 1),
+  inherit.aes = FALSE,
+  color = "black",
+  size = 1
+) +
+geom_point(
+  data = tariff_line_data,
+  aes(x = country, y = Tariff / 2.857),
+  inherit.aes = FALSE,
+  color = "black",
+  size = 2.5
+) +
+
+# Primary y-axis for trade balance, secondary y-axis for tariff (0–100%)
+scale_y_continuous(
+  labels = label_percent(scale = 1),
+  sec.axis = sec_axis(~. * 2.857, name = "Tariff (%)", breaks = seq(0, 100, 20))
+) +
+
+  labs(
+    title = "Trade Balances (% of GDP) and US Tariffs by Country",
+    x = "Country",
+    y = "Trade Balance (% of GDP)",
+    fill = "Trade Type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.title.y.right = element_text(color = "black")
+  )
+
+```
